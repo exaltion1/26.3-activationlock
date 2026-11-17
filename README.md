@@ -6,6 +6,10 @@ device**, i.e. with no app, no cable, no user interaction beyond a page load.
 
 This is a primitive report, not an exploit. Nothing here is RCE.
 
+> Fait sur un seul appareil, une seule nuit, sans câble USB, avec un partage de connexion
+> Windows qui tombait toutes les deux minutes et un portail captif qui refusait de se rouvrir.
+> C'est de la recherche de bricoleur, pas du labo. Les limites sont dites telles quelles.
+
 ---
 
 ## TL;DR
