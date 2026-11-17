@@ -1,0 +1,60 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>eh</title>
+<style>
+  body{font:15px/1.4 -apple-system,sans-serif;margin:0;padding:16px;background:#0b0b0d;color:#e8e8ea}
+  h1{font-size:18px;margin:0 0 8px;color:#fc8}
+  .k{background:#17171b;padding:10px;border-radius:8px;font:12px/1.5 ui-monospace,monospace;white-space:pre-wrap}
+</style>
+<h1>EH / compileStreaming</h1>
+<button id="go" style="width:100%;padding:16px;font-size:16px;font-weight:700;background:#5a3a10;color:#fc8;border-radius:10px;border:1px solid #a86">GO</button>
+<p id="st" class="k">pret</p>
+<pre id="lg" class="k"></pre>
+<script>
+var st = document.getElementById('st'), lg = document.getElementById('lg'), beats = 0;
+setInterval(function () { beats++; fetch('/hb?n=' + beats, { cache: 'no-store' }).catch(function () {}); }, 400);
+function ligne(s) {
+  lg.textContent = s + '\n' + lg.textContent;
+  st.textContent = s;
+  fetch('/beacon?k=' + encodeURIComponent(s.slice(0, 20)) + '&v=' + encodeURIComponent(s.slice(0, 120)),
+        { cache: 'no-store' }).catch(function () {});
+}
+
+document.getElementById('go').onclick = async function () {
+  try {
+    var r = await fetch('/eh.wasm?r=' + Math.random(), { cache: 'no-store' });
+    var variante = r.headers.get('X-Variante');
+    var octets = new Uint8Array(await r.arrayBuffer());
+    ligne('variante ' + variante + ' (' + octets.length + ' o)');
+
+    var valide = WebAssembly.validate(octets);
+    ligne('validate = ' + valide + ' (attendu false)');
+
+    try {
+      await WebAssembly.compile(octets);
+      ligne('compile() = accepte (inattendu)');
+    } catch (e2) {
+      ligne('compile() = refuse (' + e2.name + ')');
+    }
+
+    ligne('compileStreaming (variante ' + variante + ')');
+    var flux = new Response(octets, { headers: { 'Content-Type': 'application/wasm' } });
+    var mod = await WebAssembly.compileStreaming(flux);
+    ligne('compileStreaming OK');
+
+    ligne('instantiate + run()');
+    var inst = await WebAssembly.instantiate(mod, {});
+    inst.exports.run();
+    var g = 'absent';
+    if (inst.exports.m) g = new Uint32Array(inst.exports.m.buffer)[0];
+    ligne('memoire[0] = ' + g + '  (4294967295 = -1 intact, 42 = ecrase)');
+    ligne('SURVECU (variante ' + variante + ')');
+  } catch (e) {
+    ligne('EXCEPTION ' + e.name + ' ' + (e.message || '').slice(0, 60));
+  }
+};
+
+// declenchement automatique : un rechargement = une variante
+setTimeout(function () { document.getElementById('go').click(); }, 400);
+</script>

